@@ -1,5 +1,7 @@
 package union
 
+import "fmt"
+
 // ===========================================
 // Example 1: Result - Represents operation outcome
 // ===========================================
@@ -138,6 +140,35 @@ func CalculateAreaWithDefaultPanic(s Shape) float64 {
 	switch s := s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
 	case *Circle:
 		return 3.14 * s.Radius * s.Radius
+	default:
+		panic("unreachable")
+	}
+}
+
+// CalculateAreaWithDefaultPanicAndLog - OK: default has multiple statements (panic + log), treated as normal default
+func CalculateAreaWithDefaultPanicAndLog(s Shape) float64 {
+	switch s := s.(type) {
+	case *Circle:
+		return 3.14 * s.Radius * s.Radius
+	default:
+		fmt.Println("unexpected type")
+		panic("unreachable")
+	}
+}
+
+// CalculateAreaWithDefaultPanicSprintf - NG: default only panics with fmt.Sprintf, missing Rectangle and Triangle
+func CalculateAreaWithDefaultPanicSprintf(s Shape) float64 {
+	switch s := s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
+	case *Circle:
+		return 3.14 * s.Radius * s.Radius
+	default:
+		panic(fmt.Sprintf("unexpected type: %T", s))
+	}
+}
+
+// HandleShapeWithDefaultPanicOnly - NG: default only panics, no cases at all
+func HandleShapeWithDefaultPanicOnly(s Shape) {
+	switch s.(type) { // want `missing cases in type switch on Shape: union\.\*Circle, union\.\*Rectangle, union\.\*Triangle`
 	default:
 		panic("unreachable")
 	}
