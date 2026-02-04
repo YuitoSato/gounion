@@ -56,34 +56,30 @@ func checkTypeSwitches(pass *analysis.Pass, inspect *inspector.Inspector) {
 	})
 }
 
-// getSwitchType extracts the type being switched on from a type switch statement.
-func getSwitchType(pass *analysis.Pass, stmt *ast.TypeSwitchStmt) types.Type {
-	// TypeSwitchStmt.Assign is either:
-	// - *ast.ExprStmt containing x.(type)
-	// - *ast.AssignStmt like v := x.(type)
-
-	var typeAssert *ast.TypeAssertExpr
-
-	switch assign := stmt.Assign.(type) {
+// extractTypeAssertExpr extracts the TypeAssertExpr from a type switch's Assign statement.
+// The Assign field is either an *ast.ExprStmt (for x.(type)) or
+// an *ast.AssignStmt (for v := x.(type)).
+func extractTypeAssertExpr(assignStmt ast.Stmt) *ast.TypeAssertExpr {
+	switch assign := assignStmt.(type) {
 	case *ast.ExprStmt:
 		ta, ok := assign.X.(*ast.TypeAssertExpr)
-		if !ok {
-			return nil
+		if ok {
+			return ta
 		}
-		typeAssert = ta
 	case *ast.AssignStmt:
-		if len(assign.Rhs) == 0 {
-			return nil
+		if len(assign.Rhs) > 0 {
+			ta, ok := assign.Rhs[0].(*ast.TypeAssertExpr)
+			if ok {
+				return ta
+			}
 		}
-		ta, ok := assign.Rhs[0].(*ast.TypeAssertExpr)
-		if !ok {
-			return nil
-		}
-		typeAssert = ta
-	default:
-		return nil
 	}
+	return nil
+}
 
+// getSwitchType extracts the type being switched on from a type switch statement.
+func getSwitchType(pass *analysis.Pass, stmt *ast.TypeSwitchStmt) types.Type {
+	typeAssert := extractTypeAssertExpr(stmt.Assign)
 	if typeAssert == nil {
 		return nil
 	}
@@ -111,39 +107,34 @@ func extractNamedInterface(typ types.Type) *types.Named {
 	return named
 }
 
-// hasDefaultCase checks if the type switch has a default case.
-func hasDefaultCase(stmt *ast.TypeSwitchStmt) bool {
+// getDefaultCaseClause returns the default case clause from a type switch statement,
+// or nil if there is no default case.
+func getDefaultCaseClause(stmt *ast.TypeSwitchStmt) *ast.CaseClause {
 	for _, clause := range stmt.Body.List {
 		caseClause, ok := clause.(*ast.CaseClause)
 		if !ok {
 			continue
 		}
-		// nil List means default case
 		if caseClause.List == nil {
-			return true
+			return caseClause
 		}
 	}
-	return false
+	return nil
+}
+
+// hasDefaultCase checks if the type switch has a default case.
+func hasDefaultCase(stmt *ast.TypeSwitchStmt) bool {
+	return getDefaultCaseClause(stmt) != nil
 }
 
 // getDefaultCaseLastStmt returns the last statement in the default case body.
 // Returns nil if the default case has no statements.
 func getDefaultCaseLastStmt(stmt *ast.TypeSwitchStmt) ast.Stmt {
-	for _, clause := range stmt.Body.List {
-		caseClause, ok := clause.(*ast.CaseClause)
-		if !ok {
-			continue
-		}
-		// nil List means default case
-		if caseClause.List != nil {
-			continue
-		}
-		if len(caseClause.Body) == 0 {
-			return nil
-		}
-		return caseClause.Body[len(caseClause.Body)-1]
+	cc := getDefaultCaseClause(stmt)
+	if cc == nil || len(cc.Body) == 0 {
+		return nil
 	}
-	return nil
+	return cc.Body[len(cc.Body)-1]
 }
 
 // defaultCaseOnlyPanics checks if the default case body consists only of a panic call.
