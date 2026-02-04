@@ -1,6 +1,9 @@
 package consumer
 
-import "union"
+import (
+	"fmt"
+	"union"
+)
 
 // ===========================================
 // Test Cases: Using Result from external package
@@ -81,4 +84,14 @@ func GetShapeName(s union.Shape) string {
 		return "Rectangle"
 	}
 	return ""
+}
+
+// DrawShapeWithDefaultError - NG: default returns error, missing Rectangle and Triangle
+func DrawShapeWithDefaultError(s union.Shape) (string, error) {
+	switch s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
+	case *union.Circle:
+		return "drawing circle", nil
+	default:
+		return "", fmt.Errorf("unexpected shape: %T", s)
+	}
 }

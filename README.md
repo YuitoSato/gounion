@@ -129,10 +129,10 @@ func CalculateArea(s shape.Shape) float64 {
 }
 ```
 
-However, if the `default` case **only** contains a `panic()` call, the exhaustiveness check is still enforced. This is because `panic("unreachable")` in a default branch is typically used as a safety guard rather than intentional handling of unknown types:
+However, if the `default` case ends with a `panic()` call or returns an error, the exhaustiveness check is still enforced. This is because these patterns are typically used as safety guards rather than intentional handling of unknown types:
 
 ```go
-// NG: default only panics, missing Rectangle and Triangle
+// NG: default ends with panic, missing Rectangle and Triangle
 func CalculateArea(s shape.Shape) float64 {
     switch s := s.(type) {
     case *shape.Circle:
@@ -143,27 +143,41 @@ func CalculateArea(s shape.Shape) float64 {
 }
 ```
 
-Note that if the `default` case contains additional statements besides `panic()`, it is treated as a normal default and the exhaustiveness check is skipped:
+```go
+// NG: default returns error, missing Rectangle and Triangle
+func CalculateArea(s shape.Shape) (float64, error) {
+    switch s := s.(type) {
+    case *shape.Circle:
+        return 3.14 * s.Radius * s.Radius, nil
+    default:
+        return 0, fmt.Errorf("unexpected shape: %T", s)
+    }
+}
+```
+
+This also applies when additional statements (e.g., logging) precede the `panic()` or error return:
 
 ```go
-// OK: default has multiple statements, treated as normal default
+// NG: default ends with panic after logging, missing Rectangle and Triangle
 func CalculateArea(s shape.Shape) float64 {
     switch s := s.(type) {
     case *shape.Circle:
         return 3.14 * s.Radius * s.Radius
     default:
-        fmt.Println("unexpected type")
+        log.Println("unexpected type")
         panic("unreachable")
     }
 }
 ```
+
+The error return detection covers all types implementing the `error` interface, including `fmt.Errorf()`, `errors.New()`, sentinel errors, and custom error types. A `default` case that returns `nil` for the error value is treated as a normal default (no exhaustiveness check).
 
 ## How It Works
 
 1. **Detects Union Interfaces**: Finds interfaces with unexported marker methods (methods that take no parameters and return nothing)
 2. **Identifies Members**: Collects all types in the package that implement the marker method
 3. **Checks Exhaustiveness**: When a type switch is used on a union interface, verifies that all member types are handled
-4. **Respects Default**: Skips the check if a `default` case is present, unless the default only contains a `panic()` call
+4. **Respects Default**: Skips the check if a `default` case is present, unless the default ends with a `panic()` call or returns an error
 
 ## Integration with golangci-lint
 

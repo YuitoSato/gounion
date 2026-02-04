@@ -36,8 +36,8 @@ func checkTypeSwitches(pass *analysis.Pass, inspect *inspector.Inspector) {
 			return // Not a union interface
 		}
 
-		// Check for default case - if present and not panic-only, skip exhaustiveness check
-		if hasDefaultCase(switchStmt) && !defaultCaseOnlyPanics(switchStmt) {
+		// Check for default case - if present and not panic-only/error-returning, skip exhaustiveness check
+		if hasDefaultCase(switchStmt) && !defaultCaseOnlyPanics(switchStmt) && !defaultCaseOnlyReturnsError(pass, switchStmt) {
 			return
 		}
 
@@ -126,8 +126,9 @@ func hasDefaultCase(stmt *ast.TypeSwitchStmt) bool {
 	return false
 }
 
-// defaultCaseOnlyPanics checks if the default case body consists only of a panic call.
-func defaultCaseOnlyPanics(stmt *ast.TypeSwitchStmt) bool {
+// getDefaultCaseLastStmt returns the last statement in the default case body.
+// Returns nil if the default case has no statements.
+func getDefaultCaseLastStmt(stmt *ast.TypeSwitchStmt) ast.Stmt {
 	for _, clause := range stmt.Body.List {
 		caseClause, ok := clause.(*ast.CaseClause)
 		if !ok {
@@ -137,24 +138,74 @@ func defaultCaseOnlyPanics(stmt *ast.TypeSwitchStmt) bool {
 		if caseClause.List != nil {
 			continue
 		}
-		if len(caseClause.Body) != 1 {
-			return false
+		if len(caseClause.Body) == 0 {
+			return nil
 		}
-		exprStmt, ok := caseClause.Body[0].(*ast.ExprStmt)
+		return caseClause.Body[len(caseClause.Body)-1]
+	}
+	return nil
+}
+
+// defaultCaseOnlyPanics checks if the default case body consists only of a panic call.
+func defaultCaseOnlyPanics(stmt *ast.TypeSwitchStmt) bool {
+	s := getDefaultCaseLastStmt(stmt)
+	if s == nil {
+		return false
+	}
+	exprStmt, ok := s.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	callExpr, ok := exprStmt.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := callExpr.Fun.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return ident.Name == "panic"
+}
+
+// defaultCaseOnlyReturnsError checks if the default case body consists only of
+// a return statement that returns an error value (non-nil).
+func defaultCaseOnlyReturnsError(pass *analysis.Pass, stmt *ast.TypeSwitchStmt) bool {
+	s := getDefaultCaseLastStmt(stmt)
+	if s == nil {
+		return false
+	}
+	retStmt, ok := s.(*ast.ReturnStmt)
+	if !ok {
+		return false
+	}
+	errorIface := errorInterface()
+	if errorIface == nil {
+		return false
+	}
+	for _, result := range retStmt.Results {
+		// Skip nil literals
+		if ident, ok := result.(*ast.Ident); ok && ident.Name == "nil" {
+			continue
+		}
+		tv, ok := pass.TypesInfo.Types[result]
 		if !ok {
-			return false
+			continue
 		}
-		callExpr, ok := exprStmt.X.(*ast.CallExpr)
-		if !ok {
-			return false
+		if types.Implements(tv.Type, errorIface) || types.Implements(types.NewPointer(tv.Type), errorIface) {
+			return true
 		}
-		ident, ok := callExpr.Fun.(*ast.Ident)
-		if !ok {
-			return false
-		}
-		return ident.Name == "panic"
 	}
 	return false
+}
+
+// errorInterface returns the error interface type.
+func errorInterface() *types.Interface {
+	errType := types.Universe.Lookup("error").Type()
+	iface, ok := errType.Underlying().(*types.Interface)
+	if !ok {
+		return nil
+	}
+	return iface
 }
 
 // collectCaseTypes collects all types mentioned in case clauses.
