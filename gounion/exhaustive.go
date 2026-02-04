@@ -36,8 +36,8 @@ func checkTypeSwitches(pass *analysis.Pass, inspect *inspector.Inspector) {
 			return // Not a union interface
 		}
 
-		// Check for default case - if present, skip exhaustiveness check
-		if hasDefaultCase(switchStmt) {
+		// Check for default case - if present and not panic-only, skip exhaustiveness check
+		if hasDefaultCase(switchStmt) && !defaultCaseOnlyPanics(switchStmt) {
 			return
 		}
 
@@ -122,6 +122,37 @@ func hasDefaultCase(stmt *ast.TypeSwitchStmt) bool {
 		if caseClause.List == nil {
 			return true
 		}
+	}
+	return false
+}
+
+// defaultCaseOnlyPanics checks if the default case body consists only of a panic call.
+func defaultCaseOnlyPanics(stmt *ast.TypeSwitchStmt) bool {
+	for _, clause := range stmt.Body.List {
+		caseClause, ok := clause.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		// nil List means default case
+		if caseClause.List != nil {
+			continue
+		}
+		if len(caseClause.Body) != 1 {
+			return false
+		}
+		exprStmt, ok := caseClause.Body[0].(*ast.ExprStmt)
+		if !ok {
+			return false
+		}
+		callExpr, ok := exprStmt.X.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		ident, ok := callExpr.Fun.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		return ident.Name == "panic"
 	}
 	return false
 }
