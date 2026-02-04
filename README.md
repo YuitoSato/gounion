@@ -129,12 +129,41 @@ func CalculateArea(s shape.Shape) float64 {
 }
 ```
 
+However, if the `default` case **only** contains a `panic()` call, the exhaustiveness check is still enforced. This is because `panic("unreachable")` in a default branch is typically used as a safety guard rather than intentional handling of unknown types:
+
+```go
+// NG: default only panics, missing Rectangle and Triangle
+func CalculateArea(s shape.Shape) float64 {
+    switch s := s.(type) {
+    case *shape.Circle:
+        return 3.14 * s.Radius * s.Radius
+    default:
+        panic("unreachable")
+    }
+}
+```
+
+Note that if the `default` case contains additional statements besides `panic()`, it is treated as a normal default and the exhaustiveness check is skipped:
+
+```go
+// OK: default has multiple statements, treated as normal default
+func CalculateArea(s shape.Shape) float64 {
+    switch s := s.(type) {
+    case *shape.Circle:
+        return 3.14 * s.Radius * s.Radius
+    default:
+        fmt.Println("unexpected type")
+        panic("unreachable")
+    }
+}
+```
+
 ## How It Works
 
 1. **Detects Union Interfaces**: Finds interfaces with unexported marker methods (methods that take no parameters and return nothing)
 2. **Identifies Members**: Collects all types in the package that implement the marker method
 3. **Checks Exhaustiveness**: When a type switch is used on a union interface, verifies that all member types are handled
-4. **Respects Default**: Skips the check if a `default` case is present
+4. **Respects Default**: Skips the check if a `default` case is present, unless the default only contains a `panic()` call
 
 ## Integration with golangci-lint
 
