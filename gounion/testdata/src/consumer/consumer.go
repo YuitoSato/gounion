@@ -62,6 +62,16 @@ func DrawShapeWithDefault(s union.Shape) string {
 	}
 }
 
+// DrawShapeWithDefaultPanic - NG: default only panics, missing Rectangle and Triangle
+func DrawShapeWithDefaultPanic(s union.Shape) string {
+	switch s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
+	case *union.Circle:
+		return "drawing circle"
+	default:
+		panic("unreachable")
+	}
+}
+
 // GetShapeName - NG: Missing Triangle case
 func GetShapeName(s union.Shape) string {
 	switch s.(type) { // want `missing cases in type switch on Shape: union\.\*Triangle`
