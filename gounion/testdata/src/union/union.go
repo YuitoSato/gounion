@@ -1,6 +1,9 @@
 package union
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ===========================================
 // Example 1: Result - Represents operation outcome
@@ -52,6 +55,18 @@ type Triangle struct {
 func (*Circle) isShape()    {}
 func (*Rectangle) isShape() {}
 func (*Triangle) isShape()  {}
+
+// Sentinel error for testing
+var ErrUnexpectedType = errors.New("unexpected type")
+
+// Custom error type for testing
+type UnexpectedTypeError struct {
+	Type string
+}
+
+func (e *UnexpectedTypeError) Error() string {
+	return "unexpected type: " + e.Type
+}
 
 // ===========================================
 // Test Cases: Result type
@@ -145,9 +160,9 @@ func CalculateAreaWithDefaultPanic(s Shape) float64 {
 	}
 }
 
-// CalculateAreaWithDefaultPanicAndLog - OK: default has multiple statements (panic + log), treated as normal default
+// CalculateAreaWithDefaultPanicAndLog - NG: default ends with panic, missing Rectangle and Triangle
 func CalculateAreaWithDefaultPanicAndLog(s Shape) float64 {
-	switch s := s.(type) {
+	switch s := s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
 	case *Circle:
 		return 3.14 * s.Radius * s.Radius
 	default:
@@ -185,5 +200,84 @@ func CalculateAreaWithDefaultPanicComplete(s Shape) float64 {
 		return 0.5 * s.Base * s.Height
 	default:
 		panic("unreachable")
+	}
+}
+
+// ===========================================
+// Test Cases: Default returns error
+// ===========================================
+
+// HandleResultWithDefaultFmtErrorf - NG: default returns fmt.Errorf, missing Error case
+func HandleResultWithDefaultFmtErrorf(r Result) error {
+	switch r.(type) { // want `missing cases in type switch on Result: union\.\*Error`
+	case *Success:
+		return nil
+	default:
+		return fmt.Errorf("unexpected type: %T", r)
+	}
+}
+
+// CalculateAreaWithDefaultErrorsNew - NG: default returns errors.New with multiple return values, missing Rectangle and Triangle
+func CalculateAreaWithDefaultErrorsNew(s Shape) (float64, error) {
+	switch s := s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
+	case *Circle:
+		return 3.14 * s.Radius * s.Radius, nil
+	default:
+		return 0, errors.New("unexpected shape")
+	}
+}
+
+// HandleResultWithDefaultSentinelError - NG: default returns sentinel error, missing Error case
+func HandleResultWithDefaultSentinelError(r Result) error {
+	switch r.(type) { // want `missing cases in type switch on Result: union\.\*Error`
+	case *Success:
+		return nil
+	default:
+		return ErrUnexpectedType
+	}
+}
+
+// HandleResultWithDefaultCustomError - NG: default returns custom error type, missing Error case
+func HandleResultWithDefaultCustomError(r Result) error {
+	switch r.(type) { // want `missing cases in type switch on Result: union\.\*Error`
+	case *Success:
+		return nil
+	default:
+		return &UnexpectedTypeError{Type: "unknown"}
+	}
+}
+
+// CalculateAreaWithDefaultErrorAndLog - NG: default ends with return error, missing Rectangle and Triangle
+func CalculateAreaWithDefaultErrorAndLog(s Shape) (float64, error) {
+	switch s := s.(type) { // want `missing cases in type switch on Shape: union\.\*Rectangle, union\.\*Triangle`
+	case *Circle:
+		return 3.14 * s.Radius * s.Radius, nil
+	default:
+		fmt.Println("unexpected type")
+		return 0, errors.New("unexpected shape")
+	}
+}
+
+// CalculateAreaWithDefaultErrorComplete - OK: All cases covered, default returns error
+func CalculateAreaWithDefaultErrorComplete(s Shape) (float64, error) {
+	switch s := s.(type) {
+	case *Circle:
+		return 3.14 * s.Radius * s.Radius, nil
+	case *Rectangle:
+		return s.Width * s.Height, nil
+	case *Triangle:
+		return 0.5 * s.Base * s.Height, nil
+	default:
+		return 0, errors.New("unexpected shape")
+	}
+}
+
+// HandleResultWithDefaultReturnNil - OK: default returns nil (not an error), treated as normal default
+func HandleResultWithDefaultReturnNil(r Result) error {
+	switch r.(type) {
+	case *Success:
+		return nil
+	default:
+		return nil
 	}
 }
