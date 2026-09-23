@@ -6,64 +6,12 @@ import (
 	"sort"
 
 	"golang.org/x/tools/go/analysis"
-	"golang.org/x/tools/go/ast/inspector"
 )
 
 // exportUnionFacts scans the current package for union interfaces
 // and exports facts for them along with their implementing types.
-func exportUnionFacts(pass *analysis.Pass, inspect *inspector.Inspector) {
-	// Find all interface type declarations
-	nodeFilter := []ast.Node{
-		(*ast.GenDecl)(nil),
-	}
-
-	// Map to store union interfaces: interface object -> marker method name
-	unionInterfaces := make(map[*types.TypeName]string)
-
-	inspect.Preorder(nodeFilter, func(n ast.Node) {
-		genDecl := n.(*ast.GenDecl)
-
-		for _, spec := range genDecl.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-
-			// Check if it's an interface type
-			_, ok = typeSpec.Type.(*ast.InterfaceType)
-			if !ok {
-				continue
-			}
-
-			// Get the type object
-			obj := pass.TypesInfo.Defs[typeSpec.Name]
-			if obj == nil {
-				continue
-			}
-
-			typeName, ok := obj.(*types.TypeName)
-			if !ok {
-				continue
-			}
-
-			// Get the interface type
-			iface, ok := typeName.Type().Underlying().(*types.Interface)
-			if !ok {
-				continue
-			}
-
-			// Check for marker methods
-			markerMethod := findMarkerMethod(iface)
-			if markerMethod == "" {
-				continue
-			}
-
-			unionInterfaces[typeName] = markerMethod
-		}
-	})
-
-	// For each union interface, find its members and export the fact
-	for typeName, markerMethod := range unionInterfaces {
+func exportUnionFacts(pass *analysis.Pass) {
+	for typeName, markerMethod := range findUnionInterfaces(pass) {
 		members := findUnionMembers(pass, markerMethod)
 
 		fact := &UnionInterface{
@@ -72,6 +20,64 @@ func exportUnionFacts(pass *analysis.Pass, inspect *inspector.Inspector) {
 		}
 		pass.ExportObjectFact(typeName, fact)
 	}
+}
+
+// findUnionInterfaces returns the union interfaces declared in the package,
+// keyed by interface object, with their marker method name.
+func findUnionInterfaces(pass *analysis.Pass) map[*types.TypeName]string {
+	unionInterfaces := make(map[*types.TypeName]string)
+
+	// Full walk: type declarations can also appear inside function bodies.
+	for _, file := range pass.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			genDecl, ok := n.(*ast.GenDecl)
+			if !ok {
+				return true
+			}
+			for _, spec := range genDecl.Specs {
+				if typeName, markerMethod := unionInterfaceOf(pass, spec); typeName != nil {
+					unionInterfaces[typeName] = markerMethod
+				}
+			}
+			return true
+		})
+	}
+
+	return unionInterfaces
+}
+
+// unionInterfaceOf returns the type name and marker method of the union
+// interface declared by spec, or nil if spec declares something else.
+func unionInterfaceOf(pass *analysis.Pass, spec ast.Spec) (*types.TypeName, string) {
+	typeSpec, ok := spec.(*ast.TypeSpec)
+	if !ok {
+		return nil, ""
+	}
+
+	// Check if it's an interface type
+	if _, ok := typeSpec.Type.(*ast.InterfaceType); !ok {
+		return nil, ""
+	}
+
+	// Get the type object
+	typeName, ok := pass.TypesInfo.Defs[typeSpec.Name].(*types.TypeName)
+	if !ok {
+		return nil, ""
+	}
+
+	// Get the interface type
+	iface, ok := typeName.Type().Underlying().(*types.Interface)
+	if !ok {
+		return nil, ""
+	}
+
+	// Check for marker methods
+	markerMethod := findMarkerMethod(iface)
+	if markerMethod == "" {
+		return nil, ""
+	}
+
+	return typeName, markerMethod
 }
 
 // findMarkerMethod checks if an interface has a marker method.

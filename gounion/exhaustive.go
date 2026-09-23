@@ -6,54 +6,58 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
-	"golang.org/x/tools/go/ast/inspector"
 )
 
 // checkTypeSwitches checks for exhaustiveness in type switch statements
 // on union interfaces.
-func checkTypeSwitches(pass *analysis.Pass, inspect *inspector.Inspector) {
-	nodeFilter := []ast.Node{
-		(*ast.TypeSwitchStmt)(nil),
+func checkTypeSwitches(pass *analysis.Pass) {
+	for _, file := range pass.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if switchStmt, ok := n.(*ast.TypeSwitchStmt); ok {
+				checkTypeSwitch(pass, switchStmt)
+			}
+			return true
+		})
+	}
+}
+
+// checkTypeSwitch reports the union members that a type switch on a union
+// interface does not handle.
+func checkTypeSwitch(pass *analysis.Pass, switchStmt *ast.TypeSwitchStmt) {
+	// Get the switch expression type
+	switchType := getSwitchType(pass, switchStmt)
+	if switchType == nil {
+		return
 	}
 
-	inspect.Preorder(nodeFilter, func(n ast.Node) {
-		switchStmt := n.(*ast.TypeSwitchStmt)
+	// Check if it's a union interface
+	namedType := extractNamedInterface(switchType)
+	if namedType == nil {
+		return
+	}
 
-		// Get the switch expression type
-		switchType := getSwitchType(pass, switchStmt)
-		if switchType == nil {
-			return
-		}
+	var unionFact UnionInterface
+	if !pass.ImportObjectFact(namedType.Obj(), &unionFact) {
+		return // Not a union interface
+	}
 
-		// Check if it's a union interface
-		namedType := extractNamedInterface(switchType)
-		if namedType == nil {
-			return
-		}
+	// Check for default case - if present and not panic-only/error-returning, skip exhaustiveness check
+	if hasDefaultCase(switchStmt) && !defaultCaseOnlyPanics(switchStmt) && !defaultCaseOnlyReturnsError(pass, switchStmt) {
+		return
+	}
 
-		var unionFact UnionInterface
-		if !pass.ImportObjectFact(namedType.Obj(), &unionFact) {
-			return // Not a union interface
-		}
+	// Get handled types from case clauses
+	handledTypes := collectCaseTypes(pass, switchStmt)
 
-		// Check for default case - if present and not panic-only/error-returning, skip exhaustiveness check
-		if hasDefaultCase(switchStmt) && !defaultCaseOnlyPanics(switchStmt) && !defaultCaseOnlyReturnsError(pass, switchStmt) {
-			return
-		}
+	// Find missing types
+	missing := findMissingTypes(unionFact.Members, handledTypes, namedType.Obj().Pkg())
 
-		// Get handled types from case clauses
-		handledTypes := collectCaseTypes(pass, switchStmt)
-
-		// Find missing types
-		missing := findMissingTypes(unionFact.Members, handledTypes, namedType.Obj().Pkg())
-
-		if len(missing) > 0 {
-			pass.Reportf(switchStmt.Pos(),
-				"missing cases in type switch on %s: %s",
-				namedType.Obj().Name(),
-				strings.Join(missing, ", "))
-		}
-	})
+	if len(missing) > 0 {
+		pass.Reportf(switchStmt.Pos(),
+			"missing cases in type switch on %s: %s",
+			namedType.Obj().Name(),
+			strings.Join(missing, ", "))
+	}
 }
 
 // extractTypeAssertExpr extracts the TypeAssertExpr from a type switch's Assign statement.
